@@ -1,0 +1,13 @@
+{
+  "name": "sui-navi-report",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Fetches a SUI wallet's coin holdings + NAVI Protocol lending positions and writes a JSON report.",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@naviprotocol/lending": "^1.4.6"
+  }
+}

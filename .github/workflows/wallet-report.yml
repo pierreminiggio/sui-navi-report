@@ -1,0 +1,35 @@
+name: SUI Wallet Report
+
+on:
+  workflow_dispatch:
+    inputs:
+      wallet_address:
+        description: 'SUI wallet address (0x...)'
+        required: true
+        type: string
+
+jobs:
+  fetch-report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Fetch wallet + NAVI holdings
+        env:
+          WALLET_ADDRESS: ${{ inputs.wallet_address }}
+        run: node index.js
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wallet-report
+          path: output/wallet-report.json
