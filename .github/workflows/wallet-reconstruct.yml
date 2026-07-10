@@ -1,0 +1,50 @@
+name: SUI Wallet Reconstruction
+
+on:
+  workflow_dispatch:
+    inputs:
+      wallet_address:
+        description: 'SUI wallet address (0x...)'
+        required: true
+        type: string
+      target_date:
+        description: 'Reconstruct up to and including this UTC date (YYYY-MM-DD). The walk stops here - it does not go further, even if more history is available.'
+        required: true
+        type: string
+      resume_checkpoint:
+        description: 'Last checkpoint already processed for this wallet (from a previous run''s newCursor.checkpoint). Omit to start from genesis.'
+        required: false
+        type: string
+      resume_wallet_balances:
+        description: 'JSON object of coinType -> raw balance as of resume_checkpoint (from a previous run''s newCursor.balances). Omit to start from zero balances.'
+        required: false
+        type: string
+
+jobs:
+  reconstruct-report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Reconstruct wallet + NAVI holdings history
+        env:
+          WALLET_ADDRESS: ${{ inputs.wallet_address }}
+          TARGET_DATE: ${{ inputs.target_date }}
+          RESUME_CHECKPOINT: ${{ inputs.resume_checkpoint }}
+          RESUME_WALLET_BALANCES: ${{ inputs.resume_wallet_balances }}
+        run: node reconstruct.js
+
+      - name: Upload reconstruction artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wallet-reconstruction
+          path: output/reconstruction-result.json

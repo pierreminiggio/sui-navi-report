@@ -10,8 +10,16 @@ The report is uploaded as a downloadable workflow artifact — no server, no API
 
 ```
 sui-navi-report/
-├── .github/workflows/wallet-report.yml   # the GitHub Action
-├── index.js                              # the script that builds the report
+├── .github/workflows/wallet-report.yml       # live snapshot Action
+├── .github/workflows/wallet-reconstruct.yml  # historical reconstruction Action
+├── index.js                                  # builds a live report (unchanged)
+├── reconstruct.js                            # builds historical report(s) for past dates
+├── lib/
+│   ├── graphqlClient.js       # shared GraphQL POST client + coin metadata cache
+│   ├── checkpointForDate.js   # binary-searches a UTC date -> checkpoint sequence number
+│   ├── walletCoinHistory.js   # sequential wallet-coin balance replay (stateful, cursor-based)
+│   ├── naviHistory.js         # NAVI point-in-time position reads (stateless, no cursor)
+│   └── addressEncoding.js     # BCS-encodes an address for dynamic-field table lookups
 ├── package.json
 └── README.md
 ```
@@ -36,6 +44,52 @@ WALLET_ADDRESS=0xYOUR_ADDRESS node index.js
 ```
 
 The report is written to `output/wallet-report.json`.
+
+## Reconstructing historical holdings
+
+`wallet-reconstruct.yml` / `reconstruct.js` answer a different question than the live path above: "what did this wallet hold on some *past* date?" This needed two genuinely different strategies, because SUI coin balances and NAVI positions are retrievable from very different places on-chain:
+
+**Wallet coins are reconstructed by replay, not by direct lookup.** Sui's live balance-aggregation service only retains about an hour of history — there's no way to directly ask "what was this wallet's balance on date X" for anything older. So instead, `walletCoinHistory.js` walks every transaction that ever touched the wallet (Sui's transaction history for a given address goes back to genesis on the public GraphQL endpoint), sums each transaction's `balanceChanges` for our own address, and snapshots the running total at every UTC day boundary crossed along the way.
+
+This makes wallet-coin reconstruction **stateful**: it's inherently sequential (you can't know day 200's balance without knowing day 199's), so each run takes a `resume_checkpoint` + `resume_wallet_balances` pair and returns a `newCursor` for the next run to resume from. **A run only ever walks forward to `target_date` — it never walks further just because more history happens to be available**, so that the cursor always reflects exactly where reconstruction has gotten to, one call at a time.
+
+**NAVI positions are reconstructed by direct historical reads — no replay needed at all.** NAVI stores each asset's interest-accrual state (`current_supply_index` / `current_borrow_index`) and every user's scaled balance as plain on-chain object state, which Sui's GraphQL RPC can read directly at a past checkpoint via `checkpoint(sequenceNumber) { query { object(address) { ... } } }`. So `naviHistory.js` does two direct reads per asset per date — the reserve's index, and this wallet's entry in that reserve's dynamic-field table — multiplies them together, and that's the historical balance. This makes NAVI reconstruction **stateless**: no cursor, no resume state, every date is an independent lookup unrelated to any other.
+
+### Running a reconstruction
+
+Same as the live workflow, but via **SUI Wallet Reconstruction** in the Actions tab, with these inputs:
+
+| Input | Required | Description |
+|---|---|---|
+| `wallet_address` | yes | Same as the live workflow |
+| `target_date` | yes | UTC date (`YYYY-MM-DD`) to reconstruct up to |
+| `resume_checkpoint` | no | From a previous run's `newCursor.checkpoint` — omit to start from genesis |
+| `resume_wallet_balances` | no | From a previous run's `newCursor.balances` — omit to start from zero |
+
+The artifact (`wallet-reconstruction`) contains `output/reconstruction-result.json`:
+
+```json
+{
+  "newCursor": {
+    "checkpoint": 158700234,
+    "balances": { "0x2::sui::SUI": "5117254324" }
+  },
+  "dailySnapshots": [
+    { "date": "2025-09-14", "report": { "...": "same shape as wallet-report.json, plus asOfDate and source" } }
+  ]
+}
+```
+
+Since a single run naturally passes through every intermediate day on its way to `target_date`, `dailySnapshots` contains **all of them**, not just the final day — so one run backfills a whole range, not just one date.
+
+### Known limitations / things not yet reconstructed
+
+- **`navi.healthFactor` is always `null` in reconstructed reports.** It's a live risk calculation (aggregate LTV using *current* oracle prices across all positions), not stored balance data — reconstructing it faithfully would need each asset's oracle price as of that specific checkpoint, which hasn't been verified as readable yet. `navi.positions[].priceUsd` is similarly today's price, not the historical one, for the same reason.
+- **`getPools({ markets: ['main', 'rwa'] })`'s exact response shape is inferred from SDK documentation examples, not directly tested against a live call.** If pool metadata fields (`reserveId`, `token.price`, etc.) come back under different key names than `reconstruct.js` assumes, pools will silently resolve to zero positions rather than error — worth checking the console warnings on a first run.
+- **Reconstruction of dates before the on-chain data itself becomes unavailable will fail loudly** (`checkpointForDate` throws, or a reserve's `object` query returns nothing precisely because it didn't exist yet) rather than silently returning an empty report — this is intentional, per the same reasoning as the API's `/sui-holdings/{address}` endpoint failing rather than guessing.
+- **The date→checkpoint binary search costs ~28-30 GraphQL round trips per run.** Fine for one-off/manual reconstruction, but worth batching or caching if this ever needs to resolve many dates per run.
+
+
 
 ## Output schema
 
