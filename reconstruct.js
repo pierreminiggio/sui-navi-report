@@ -71,14 +71,25 @@ async function main() {
   // across NAVI's Nov 2025 package upgrade), only the *contents* we read are
   // checkpoint-scoped.
   const rawPools = await getPools({ markets: ['main', 'rwa'] })
-  const pools = rawPools.map((p) => ({
-    market: p.market,
-    assetId: p.assetId,
-    symbol: p.token?.symbol ?? null,
-    coinType: p.coinType ?? null,
-    reserveId: p.contract?.reserveId,
-    priceUsd: p.token?.price ?? null
-  })).filter((p) => p.reserveId)
+  const pools = rawPools.map((p) => {
+    const assetId = p.id ?? p.assetId ?? null
+
+    if (assetId === null) {
+      console.warn(
+        `Pool ${p.token?.symbol ?? '?'} (${p.market}): couldn't resolve an assetId ` +
+        `from either 'id' or 'assetId' - check getPools()'s actual field names`
+      )
+    }
+
+    return {
+      market: p.market,
+      assetId,
+      symbol: p.token?.symbol ?? null,
+      coinType: p.coinType ?? null,
+      reserveId: p.contract?.reserveId,
+      priceUsd: p.token?.price ?? null
+    }
+  }).filter((p) => p.reserveId)
 
   const userKeyBcs = addressToBcsBase64(address)
 
