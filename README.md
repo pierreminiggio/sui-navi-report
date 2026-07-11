@@ -10,6 +10,7 @@ The report is uploaded as a downloadable workflow artifact — no server, no API
 
 ```
 sui-navi-report/
+├── AGENTS.md                                  # deep technical/methodology notes for future work
 ├── .github/workflows/wallet-report.yml       # live snapshot Action
 ├── .github/workflows/wallet-reconstruct.yml  # historical reconstruction Action
 ├── index.js                                  # builds a live report (unchanged)
@@ -23,6 +24,14 @@ sui-navi-report/
 ├── package.json
 └── README.md
 ```
+
+**If you're an AI agent (or a human) about to modify anything under `lib/` or
+`reconstruct.js`, read `AGENTS.md` first.** It documents the on-chain
+architecture facts this project depends on, every wrong assumption that
+turned into a real bug along the way (and how each was caught), and known
+object addresses that took real investigation to pin down. This README is
+the user-facing "how to run it" doc; `AGENTS.md` is the "why it's built this
+way, and what to watch out for" doc.
 
 ## Running it on GitHub (recommended)
 
@@ -81,6 +90,38 @@ The artifact (`wallet-reconstruction`) contains `output/reconstruction-result.js
 ```
 
 Since a single run naturally passes through every intermediate day on its way to `target_date`, `dailySnapshots` contains **all of them**, not just the final day — so one run backfills a whole range, not just one date.
+
+### How much to trust this data
+
+Reconstruction isn't a black box — it's been tested against reality, not just
+"it ran without crashing":
+
+- **Wallet coin balances**: a full genesis-to-present replay (96 daily
+  snapshots spanning ~9.5 months) was diffed against a real live report
+  generated independently via `index.js`. Every coin balance matched
+  **exactly**, digit for digit.
+- **NAVI `main`-market positions**: all positions across that same 9.5-month
+  replay showed smooth, monotonically-increasing supply/borrow amounts
+  consistent with real interest accrual, with no anomalies — and the final
+  snapshot's values landed within the expected interest drift of the same
+  live ground-truth report.
+- **NAVI `rwa`-market positions**: cross-checked the same way after being
+  fixed — one asset matched the live report **exactly**; another landed
+  within expected interest drift.
+- **Resume/cursor correctness**: reconstructing the same date range from
+  genesis vs. resuming from a saved cursor partway through produced
+  **byte-identical** results and converged on the same final cursor.
+- **A real bug was caught and fixed along the way** — a transient read
+  failure silently produced a wrong snapshot (a supply position vanished for
+  exactly one day, then reappeared higher than before). It was confirmed as
+  a bug, not real trading activity, by cross-referencing the wallet's own
+  transaction history for that day (only an ordinary gas fee, nothing that
+  could explain the missing position) — see `AGENTS.md` for the full story.
+
+That said, this has all been tested against **one wallet's real history**,
+not a broad test suite. Treat new wallets, especially ones with unusual
+activity patterns (very high transaction volume, assets outside the ones
+already seen), with a bit more scrutiny until they've been spot-checked too.
 
 ### Known limitations / things not yet reconstructed
 
