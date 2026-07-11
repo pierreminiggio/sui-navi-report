@@ -71,17 +71,6 @@ async function main() {
   // across NAVI's Nov 2025 package upgrade), only the *contents* we read are
   // checkpoint-scoped.
   const rawPools = await getPools({ markets: ['main', 'rwa'] })
-
-  // Diagnostic: a real reconstruction run showed "rwa" never appearing as a
-  // market value anywhere in the output, despite the wallet holding a real
-  // rwa-market position per the live ground-truth report. Logging the raw
-  // shape here rather than guessing a second time what's wrong.
-  console.log(`getPools() returned ${rawPools.length} pools`)
-  console.log('Distinct raw market values:', [...new Set(rawPools.map((p) => p.market))])
-  const rwaSample = rawPools.find((p) => p.market === 'rwa')
-  console.log('Sample pool tagged market==="rwa":', JSON.stringify(rwaSample ?? null, null, 2))
-  const xaumSamples = rawPools.filter((p) => p.token?.symbol === 'XAUm' || p.coinType?.includes('xaum'))
-  console.log('All pools matching XAUm:', JSON.stringify(xaumSamples, null, 2))
   const pools = rawPools.map((p) => {
     const assetId = p.id ?? p.assetId ?? null
 
@@ -100,7 +89,7 @@ async function main() {
       reserveId: p.contract?.reserveId,
       priceUsd: p.token?.price ?? null
     }
-  }).filter((p) => p.reserveId)
+  }).filter((p) => p.reserveId || p.market === 'rwa')
 
   const userKeyBcs = addressToBcsBase64(address)
 
