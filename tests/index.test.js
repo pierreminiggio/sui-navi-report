@@ -5,6 +5,10 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { buildWalletReport, buildNaviReport } from '../index.js'
 
+// tests/fixtures/live-report.golden.json is a real wallet-report.json artifact
+// pulled from a live GitHub Actions run (2026-07-31), post-fix -- not a mock or
+// hand-reconstructed value set. Confirms the fix works end-to-end against real
+// Sui infrastructure, not just against our own mocks.
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const golden = JSON.parse(
   readFileSync(path.join(__dirname, 'fixtures/live-report.golden.json'), 'utf8')
