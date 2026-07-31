@@ -3,7 +3,6 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
-import { SuiClient } from '@mysten/sui/client'
 import { buildWalletReport, buildNaviReport } from '../index.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -114,30 +113,27 @@ test('buildNaviReport reproduces the known-good navi shape and values', async ()
   }
 })
 
-test('buildNaviReport defaults to a GraphQL-transport client, not the SDK\'s dead JSON-RPC default, when none is injected', async () => {
-  let capturedClient
+test('buildNaviReport defers to the SDK\'s own default client when none is injected', async () => {
+  let capturedOptions
 
   const navi = await buildNaviReport(golden.address, {
     getLendingStateFn: async (_owner, options) => {
-      capturedClient = options?.client
+      capturedOptions = options
       return []
     },
     getHealthFactorFn: async () => 0
   })
 
-  // Must still be a SuiClient (the class @naviprotocol/lending's installed
-  // version actually calls .devInspectTransactionBlock() on) -- just one wired
-  // to the GraphQL transport instead of a public JSON-RPC full node.
-  assert.ok(
-    capturedClient instanceof SuiClient,
-    'expected the default client to be a SuiClient, since @naviprotocol/lending calls ' +
-      'devInspectTransactionBlock() on it directly'
-  )
-  assert.notEqual(
-    capturedClient,
+  // We deliberately do NOT construct our own client anymore: as of
+  // @naviprotocol/lending 2.0.8, the SDK's own default is a correctly-configured
+  // gRPC client (verified by reading node_modules/@naviprotocol/lending/dist/sui.js).
+  // Forcing a client here would just be us second-guessing a dependency that
+  // already fixed itself -- and is exactly the kind of assumption that broke
+  // the previous (GraphQL-transport) attempt at this fix.
+  assert.equal(
+    capturedOptions,
     undefined,
-    'buildNaviReport must always pass an explicit client -- leaving it undefined falls back ' +
-      "to the SDK's own default, which points at a retired public JSON-RPC full node"
+    'buildNaviReport should not force a client when none is injected'
   )
   assert.deepEqual(navi.positions, [])
 })

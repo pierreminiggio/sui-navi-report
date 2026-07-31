@@ -1,26 +1,16 @@
 import { getLendingState, getHealthFactor } from '@naviprotocol/lending'
-import { SuiClient } from '@mysten/sui/client'
-import { SuiClientGraphQLTransport } from '@mysten/graphql-transport'
 import { writeFileSync, mkdirSync } from 'fs'
 import { fileURLToPath } from 'url'
 
 const SUI_GRAPHQL_URL = 'https://graphql.mainnet.sui.io/graphql'
 
-// getLendingState/getHealthFactor build a short-lived transaction under the hood
-// (devInspectTransactionBlock) to read on-chain state, and default to a SuiClient
-// pointed at a public JSON-RPC full node. Sui's public JSON-RPC full nodes were
-// retired the week of July 27, 2026 (docs.sui.io/references/sui-api), so that
-// default now fails with a -32601 "Method not found" JsonRpcError. Passing our
-// own SuiClient -- same class the SDK expects, just wired to the GraphQL
-// transport we already use for wallet balances above -- avoids the dead
-// endpoint. (Not @mysten/sui's newer SuiGrpcClient: @naviprotocol/lending's
-// installed version still imports the pre-2.0 SuiClient/devInspectTransactionBlock
-// API, so the injected client has to match that same surface.)
-function createSuiClient() {
-  return new SuiClient({
-    transport: new SuiClientGraphQLTransport({ url: SUI_GRAPHQL_URL })
-  })
-}
+// NOTE on the JSON-RPC deprecation bug: earlier versions of @naviprotocol/lending
+// (<=1.4.6) defaulted to a SuiClient pointed at a public JSON-RPC full node, which
+// Sui retired the week of July 27, 2026 (-32601 Method not found). @naviprotocol/
+// lending@2.0.8 fixes this upstream -- its own default client is now a SuiGrpcClient
+// against https://fullnode.mainnet.sui.io:443 (verified by reading its source: see
+// node_modules/@naviprotocol/lending/dist/sui.js). So as long as this package stays
+// on ^2.0.0+, no custom client needs to be constructed here at all.
 
 // --- Step 1: fetch raw coin balances owned by the wallet ---
 export async function fetchWalletBalances(owner) {
@@ -100,19 +90,17 @@ export async function buildWalletReport(owner) {
 }
 
 // --- Step 4: fetch NAVI protocol lending/borrowing positions ---
-// Dependencies are injectable (client / getLendingStateFn / getHealthFactorFn)
-// so tests can substitute fakes instead of hitting the real SDK + network --
-// see tests/index.test.js. Production always uses the real defaults.
+// getLendingStateFn/getHealthFactorFn/client are injectable so tests can
+// substitute fakes instead of hitting the real SDK + network -- see
+// tests/index.test.js. Production never passes a client and relies on the
+// SDK's own default (a working gRPC client as of @naviprotocol/lending 2.x).
 export async function buildNaviReport(
   owner,
-  {
-    client = createSuiClient(),
-    getLendingStateFn = getLendingState,
-    getHealthFactorFn = getHealthFactor
-  } = {}
+  { client, getLendingStateFn = getLendingState, getHealthFactorFn = getHealthFactor } = {}
 ) {
-  const positions = await getLendingStateFn(owner, { client })
-  const healthFactor = await getHealthFactorFn(owner, { client })
+  const options = client ? { client } : undefined
+  const positions = await getLendingStateFn(owner, options)
+  const healthFactor = await getHealthFactorFn(owner, options)
 
   const simplified = positions.map((p) => ({
     market: p.market,
