@@ -1,17 +1,19 @@
 import { getLendingState, getHealthFactor } from '@naviprotocol/lending'
 import { writeFileSync, mkdirSync } from 'fs'
+import { fileURLToPath } from 'url'
 
 const SUI_GRAPHQL_URL = 'https://graphql.mainnet.sui.io/graphql'
 
-const address = process.env.WALLET_ADDRESS
-
-if (!address) {
-  console.error('Error: WALLET_ADDRESS environment variable is required')
-  process.exit(1)
-}
+// NOTE on the JSON-RPC deprecation bug: earlier versions of @naviprotocol/lending
+// (<=1.4.6) defaulted to a SuiClient pointed at a public JSON-RPC full node, which
+// Sui retired the week of July 27, 2026 (-32601 Method not found). @naviprotocol/
+// lending@2.0.8 fixes this upstream -- its own default client is now a SuiGrpcClient
+// against https://fullnode.mainnet.sui.io:443 (verified by reading its source: see
+// node_modules/@naviprotocol/lending/dist/sui.js). So as long as this package stays
+// on ^2.0.0+, no custom client needs to be constructed here at all.
 
 // --- Step 1: fetch raw coin balances owned by the wallet ---
-async function fetchWalletBalances(owner) {
+export async function fetchWalletBalances(owner) {
   const query = `
     query WalletHoldings($owner: SuiAddress!) {
       address(address: $owner) {
@@ -41,7 +43,7 @@ async function fetchWalletBalances(owner) {
 }
 
 // --- Step 2: fetch decimals/symbol for a given coin type ---
-async function fetchCoinMetadata(coinType) {
+export async function fetchCoinMetadata(coinType) {
   const query = `
     query CoinMeta($type: String!) {
       coinMetadata(coinType: $type) {
@@ -63,7 +65,7 @@ async function fetchCoinMetadata(coinType) {
 }
 
 // --- Step 3: combine raw balances with decimals into human-readable amounts ---
-async function buildWalletReport(owner) {
+export async function buildWalletReport(owner) {
   const rawBalances = await fetchWalletBalances(owner)
 
   const enriched = await Promise.all(
@@ -88,9 +90,17 @@ async function buildWalletReport(owner) {
 }
 
 // --- Step 4: fetch NAVI protocol lending/borrowing positions ---
-async function buildNaviReport(owner) {
-  const positions = await getLendingState(owner)
-  const healthFactor = await getHealthFactor(owner)
+// getLendingStateFn/getHealthFactorFn/client are injectable so tests can
+// substitute fakes instead of hitting the real SDK + network -- see
+// tests/index.test.js. Production never passes a client and relies on the
+// SDK's own default (a working gRPC client as of @naviprotocol/lending 2.x).
+export async function buildNaviReport(
+  owner,
+  { client, getLendingStateFn = getLendingState, getHealthFactorFn = getHealthFactor } = {}
+) {
+  const options = client ? { client } : undefined
+  const positions = await getLendingStateFn(owner, options)
+  const healthFactor = await getHealthFactorFn(owner, options)
 
   const simplified = positions.map((p) => ({
     market: p.market,
@@ -108,21 +118,34 @@ async function buildNaviReport(owner) {
   return { positions: simplified, healthFactor }
 }
 
-// --- Main ---
-async function main() {
-  console.log(`Fetching report for ${address}...`)
-
+// --- Assemble the full report (same shape main() has always written) ---
+export async function buildReport(owner) {
   const [wallet, navi] = await Promise.all([
-    buildWalletReport(address),
-    buildNaviReport(address)
+    buildWalletReport(owner),
+    buildNaviReport(owner)
   ])
 
-  const report = {
-    address,
+  return {
+    address: owner,
     generatedAt: new Date().toISOString(),
     wallet: { coins: wallet },
     navi
   }
+}
+
+// --- Main (CLI entry point only -- not run on import, so this module can be
+// imported by tests without WALLET_ADDRESS set or a live report being built) ---
+async function main() {
+  const address = process.env.WALLET_ADDRESS
+
+  if (!address) {
+    console.error('Error: WALLET_ADDRESS environment variable is required')
+    process.exit(1)
+  }
+
+  console.log(`Fetching report for ${address}...`)
+
+  const report = await buildReport(address)
 
   mkdirSync('output', { recursive: true })
   writeFileSync('output/wallet-report.json', JSON.stringify(report, null, 2))
@@ -130,7 +153,9 @@ async function main() {
   console.log('Report written to output/wallet-report.json')
 }
 
-main().catch((err) => {
-  console.error('Failed to generate report:', err)
-  process.exit(1)
-})
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    console.error('Failed to generate report:', err)
+    process.exit(1)
+  })
+}

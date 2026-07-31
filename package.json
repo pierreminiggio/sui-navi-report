@@ -5,9 +5,11 @@
   "private": true,
   "description": "Fetches a SUI wallet's coin holdings + NAVI Protocol lending positions and writes a JSON report.",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "test": "node --test tests/*.test.js"
   },
   "dependencies": {
-    "@naviprotocol/lending": "^1.4.6"
+    "@naviprotocol/lending": "^2.0.8",
+    "@mysten/sui": "^2.0.0"
   }
 }
